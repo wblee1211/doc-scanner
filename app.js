@@ -668,6 +668,7 @@ window.App = (() => {
       card.className = 'page-card';
       card.innerHTML = `
         <div class="thumb"><img src="${p.out}" alt="${i + 1}페이지" /></div>
+        ${p.ocr ? '<span class="ocr-badge">텍스트</span>' : ''}
         <div class="meta">
           <span class="num">${i + 1}</span>
           <div class="acts">
@@ -681,6 +682,7 @@ window.App = (() => {
       grid.appendChild(card);
     });
     updatePagesButton();
+    updateOcrButtons();
   }
 
   function pageAction(act, i) {
@@ -712,6 +714,93 @@ window.App = (() => {
     } finally { hideLoader(); }
   }
 
+  // ---------- 글자 인식 (OCR) ----------
+  const OCR_STATUS = {
+    'loading tesseract core': '인식 엔진 불러오는 중…',
+    'initializing tesseract': '인식 엔진 준비 중…',
+    'loading language traineddata': '한국어·영어 데이터 내려받는 중… (처음 한 번)',
+    'initializing api': '인식 엔진 준비 중…',
+    'recognizing text': '글자 인식 중…',
+  };
+
+  function updateOcrButtons() {
+    const n = state.pages.length;
+    const done = state.pages.filter((p) => p.ocr).length;
+    $('btnText').classList.toggle('hidden', done === 0);
+    $('ocrNote').classList.toggle('hidden', done === 0);
+    $('btnOcr').lastChild.textContent = done && done === n ? '다시 인식' : '글자 인식';
+  }
+
+  let ocrRunning = false;
+  async function runOcr() {
+    if (ocrRunning || !state.pages.length) return;
+    // 모두 인식된 상태면 전체 다시, 아니면 안 된 페이지만
+    const all = state.pages.every((p) => p.ocr);
+    const targets = state.pages.filter((p) => all || !p.ocr);
+    ocrRunning = true;
+    showLoader('글자 인식 준비 중…');
+    try {
+      for (let k = 0; k < targets.length; k++) {
+        const page = targets[k];
+        const idx = state.pages.indexOf(page) + 1;
+        const head = targets.length > 1 ? `${idx}페이지 (${k + 1}/${targets.length}) · ` : '';
+        const img = await loadImage(page.out);
+        const prepped = Scanner.ocrPrep(canvasFromImage(img, 4000));
+        page.ocr = await OCR.recognize(prepped, (m) => {
+          const label = OCR_STATUS[m.status] || '글자 인식 준비 중…';
+          const pct = m.status === 'recognizing text' || m.status === 'loading language traineddata'
+            ? ` ${Math.round((m.progress || 0) * 100)}%` : '';
+          $('loaderText').textContent = head + label + pct;
+        });
+      }
+      hideLoader();
+      renderPages();
+      const empty = targets.every((p) => !p.ocr.text);
+      if (empty) toast('글자를 찾지 못했어요. 더 밝고 선명하게 찍어보세요', 3000);
+      else openTextSheet();
+    } catch (e) {
+      console.error(e);
+      hideLoader();
+      toast('글자 인식에 실패했어요. 인터넷 연결을 확인해주세요', 3000);
+    } finally {
+      ocrRunning = false;
+    }
+  }
+
+  function openTextSheet() {
+    const multi = state.pages.length > 1;
+    $('ocrText').value = state.pages
+      .map((p, i) => {
+        const body = p.ocr ? (p.ocr.text || '(글자 없음)') : '(아직 인식하지 않음)';
+        return multi ? `[${i + 1}페이지]\n${body}` : body;
+      })
+      .join('\n\n');
+    $('textSheet').classList.remove('hidden');
+  }
+
+  async function copyText() {
+    const ta = $('ocrText');
+    try {
+      await navigator.clipboard.writeText(ta.value);
+    } catch {
+      ta.select();
+      document.execCommand('copy');
+      ta.setSelectionRange(0, 0);
+    }
+    toast('텍스트를 복사했어요');
+  }
+
+  function saveText() {
+    const blob = new Blob([$('ocrText').value], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName().replace(/\.pdf$/, '') + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
   // ---------- PDF ----------
   const PAGE_SIZES = { a4: [595.28, 841.89], letter: [612, 792] };
 
@@ -730,6 +819,7 @@ window.App = (() => {
     if (!window.jspdf) throw new Error('jsPDF 로드 실패');
     const { jsPDF } = window.jspdf;
     let doc = null;
+    let withText = state.pages.some((p) => p.ocr && p.ocr.lines.length);
     for (const p of state.pages) {
       const landscape = p.w > p.h;
       let pw, ph;
@@ -744,13 +834,18 @@ window.App = (() => {
         ph = landscape ? a : b;
       }
       const orientation = pw > ph ? 'l' : 'p';
-      if (!doc) doc = new jsPDF({ orientation, unit: 'pt', format: [pw, ph], compress: true });
-      else doc.addPage([pw, ph], orientation);
+      if (!doc) {
+        doc = new jsPDF({ orientation, unit: 'pt', format: [pw, ph], compress: true });
+        if (withText) {
+          try { await OCR.ensureFont(doc); } catch (e) { console.warn(e); withText = false; toast('글꼴을 불러오지 못해 글자 없이 저장해요'); }
+        }
+      } else doc.addPage([pw, ph], orientation);
 
       // 페이지 안에 비율 유지하며 가운데 배치
       const s = Math.min(pw / p.w, ph / p.h);
-      const iw = p.w * s, ih = p.h * s;
-      doc.addImage(p.out, 'JPEG', (pw - iw) / 2, (ph - ih) / 2, iw, ih, undefined, 'FAST');
+      const iw = p.w * s, ih = p.h * s, x = (pw - iw) / 2, y = (ph - ih) / 2;
+      doc.addImage(p.out, 'JPEG', x, y, iw, ih, undefined, 'FAST');
+      if (withText && p.ocr) OCR.addTextLayer(doc, p.ocr, x, y, iw, ih);
     }
     doc.setProperties({ title: fileName().replace(/\.pdf$/, ''), creator: '문서 스캐너' });
     return doc;
@@ -855,6 +950,11 @@ window.App = (() => {
 
     $('btnViewerClose').addEventListener('click', () => $('viewer').classList.add('hidden'));
     $('btnViewerEdit').addEventListener('click', () => editPage(state.viewerIndex));
+    $('btnOcr').addEventListener('click', runOcr);
+    $('btnText').addEventListener('click', openTextSheet);
+    $('btnTextClose').addEventListener('click', () => $('textSheet').classList.add('hidden'));
+    $('btnTextCopy').addEventListener('click', copyText);
+    $('btnTextSave').addEventListener('click', saveText);
 
     $('pdfName').value = defaultFileName();
 

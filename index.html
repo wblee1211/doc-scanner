@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>문서 스캐너</title>
   <link rel="manifest" href="manifest.json" />
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <!-- 로딩 오버레이 -->
@@ -160,6 +160,15 @@
           <button data-size="fit">이미지 맞춤</button>
         </div>
       </div>
+      <div class="ocr-row">
+        <button class="btn ghost grow" id="btnOcr">
+          <svg viewBox="0 0 24 24" class="inline"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M9 20h6"/></svg>글자 인식
+        </button>
+        <button class="btn ghost grow hidden" id="btnText">
+          <svg viewBox="0 0 24 24" class="inline"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>텍스트 보기
+        </button>
+      </div>
+      <p class="ocr-note hidden" id="ocrNote">글자 인식된 페이지는 검색·복사 가능한 PDF로 저장돼요</p>
       <div class="export-actions">
         <button class="btn ghost" id="btnShare">
           <svg viewBox="0 0 24 24" class="inline"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v7h14v-7"/></svg>공유
@@ -181,12 +190,31 @@
     <div class="stage"><img id="viewerImg" alt="페이지 미리보기" /></div>
   </div>
 
+  <!-- 인식된 텍스트 -->
+  <div id="textSheet" class="viewer hidden">
+    <header class="topbar">
+      <button class="text-btn" id="btnTextClose">닫기</button>
+      <div class="title">인식된 텍스트</div>
+      <button class="text-btn accent" id="btnTextCopy">복사</button>
+    </header>
+    <div class="text-body">
+      <textarea id="ocrText" spellcheck="false"></textarea>
+      <p class="sub-hint">틀린 글자는 직접 고친 뒤 복사·저장할 수 있어요</p>
+    </div>
+    <footer class="toolbar">
+      <button class="btn ghost grow" id="btnTextSave">
+        <svg viewBox="0 0 24 24" class="inline"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>텍스트 파일(.txt) 저장
+      </button>
+    </footer>
+  </div>
+
   <div id="toast" class="toast"></div>
   <canvas id="workCanvas" hidden></canvas>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="scanner.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="scanner.js?v=4"></script>
+  <script src="ocr.js?v=4"></script>
+  <script src="app.js?v=4"></script>
   <script>
     // OpenCV.js 로드 (실패 시 대체 CDN)
     (function loadOpenCV() {

@@ -372,6 +372,69 @@ window.Scanner = (() => {
   }
 
   /**
+   * 글자가 아닌 큰 테두리(답 칸 네모, 그림 틀)와 가로줄(분수선, 밑줄)을 지운다
+   * ink: 글자=255 인 이진 이미지 (제자리 수정)
+   */
+  function removeBoxesAndRules(ink) {
+    const labels = new cv.Mat(), stats = new cv.Mat(), cents = new cv.Mat();
+    const n = cv.connectedComponentsWithStats(ink, labels, stats, cents, 8, cv.CV_32S);
+    const W = cv.CC_STAT_WIDTH, H = cv.CC_STAT_HEIGHT, A = cv.CC_STAT_AREA;
+    // 글자 크기 기준: 적당한 크기 덩어리들의 높이 중앙값
+    const hs = [];
+    for (let i = 1; i < n; i++) {
+      const h = stats.intAt(i, H), a = stats.intAt(i, A);
+      if (a >= 12 && h >= 6) hs.push(h);
+    }
+    hs.sort((x, y) => x - y);
+    const med = hs.length ? hs[Math.floor(hs.length / 2)] : 20;
+    const kill = new Uint8Array(n);
+    for (let i = 1; i < n; i++) {
+      const w = stats.intAt(i, W), h = stats.intAt(i, H), a = stats.intAt(i, A);
+      const fill = a / (w * h);
+      const hollowBox = (h > med * 1.8 || w > med * 4) && fill < 0.3;      // 속이 빈 큰 테두리
+      const rule = w > med * 2.5 && h < med * 0.45;                         // 가로선
+      const bar = h > med * 2.5 && w < med * 0.45;                          // 세로선
+      const blob = (h > med * 4 && w > med * 4);                            // 큰 그림 덩어리
+      if (hollowBox || rule || bar || blob) kill[i] = 1;
+    }
+    const lab = labels.data32S, d = ink.data;
+    for (let i = 0; i < lab.length; i++) if (kill[lab[i]]) d[i] = 0;
+    labels.delete(); stats.delete(); cents.delete();
+  }
+
+  /**
+   * 글자 인식용 전처리: 흑백으로 만들고, 네모 칸·밑줄 같은 긴 선을 지워 글자만 남긴다
+   * @returns {HTMLCanvasElement}
+   */
+  function ocrPrep(canvas) {
+    const out = document.createElement('canvas');
+    out.width = canvas.width; out.height = canvas.height;
+    if (!ready) { out.getContext('2d').drawImage(canvas, 0, 0); return out; }
+    const src = cv.imread(canvas);
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    src.delete();
+    const norm = normalizeChannel(gray, false);
+    gray.delete();
+    const px = norm.rows * norm.cols;
+    const d = norm.data;
+    const { white, black } = autoLevels((i) => d[i], px);
+    const ink = new cv.Mat(); // 글자 = 흰색(255)
+    cv.threshold(norm, ink, black + (white - black) * LEVELS.bwRatio, 255, cv.THRESH_BINARY_INV);
+    norm.delete();
+
+    removeBoxesAndRules(ink);
+
+    cv.bitwise_not(ink, ink); // 다시 흰 바탕 검은 글자
+    removeSpeckles(ink, Math.max(4, Math.round(px / 400000)));
+    const rgba = new cv.Mat();
+    cv.cvtColor(ink, rgba, cv.COLOR_GRAY2RGBA);
+    cv.imshow(out, rgba);
+    ink.delete(); rgba.delete();
+    return out;
+  }
+
+  /**
    * 필터 적용
    * @param {'original'|'clean'|'gray'|'bw'} filter  clean=자연스러운 컬러 문서
    */
@@ -392,5 +455,5 @@ window.Scanner = (() => {
     return out;
   }
 
-  return { init, isReady, detect, warp, applyFilter, orderQuad, isConvex, polygonArea, LEVELS };
+  return { init, isReady, detect, warp, applyFilter, ocrPrep, orderQuad, isConvex, polygonArea, LEVELS };
 })();
