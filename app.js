@@ -344,7 +344,7 @@ window.App = (() => {
       const url = URL.createObjectURL(files[0]);
       try {
         const img = await loadImage(url);
-        await startSession(canvasFromImage(img, 3000));
+        await startSession(canvasFromImage(img, 4000));
       } catch { toast('이미지를 불러올 수 없습니다'); }
       finally { URL.revokeObjectURL(url); }
       return;
@@ -357,7 +357,7 @@ window.App = (() => {
       const url = URL.createObjectURL(files[i]);
       try {
         const img = await loadImage(url);
-        const canvas = canvasFromImage(img, 3000);
+        const canvas = canvasFromImage(img, 4000);
         let quad = null;
         if (state.cvReady) { try { quad = Scanner.detect(canvas, 600); } catch {} }
         quad = quad || fullQuad(canvas.width, canvas.height);
@@ -618,7 +618,7 @@ window.App = (() => {
       quad: ses.quad.map((p) => ({ ...p })),
       filter: ses.filter,
       rotation: ses.rotation,
-      out: outCanvas.toDataURL('image/jpeg', ses.filter === 'bw' ? 0.8 : 0.88),
+      out: outCanvas.toDataURL('image/jpeg', ses.filter === 'bw' ? 0.85 : 0.92),
       w: outCanvas.width,
       h: outCanvas.height,
     };
@@ -810,6 +810,7 @@ window.App = (() => {
     $('fileInput').addEventListener('change', (e) => { handleFiles(e.target.files); e.target.value = ''; });
     $('fallbackInput').addEventListener('change', (e) => { handleFiles(e.target.files); e.target.value = ''; });
     $('btnFallbackCapture').addEventListener('click', () => $('fallbackInput').click());
+    $('btnNativeCam').addEventListener('click', () => $('fallbackInput').click());
 
     $('btnCropBack').addEventListener('click', () => {
       const wasEdit = state.session && state.session.editIndex != null;

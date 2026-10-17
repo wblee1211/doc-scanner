@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>문서 스캐너</title>
   <link rel="manifest" href="manifest.json" />
-  <link rel="stylesheet" href="style.css?v=2" />
+  <link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body>
   <!-- 로딩 오버레이 -->
@@ -32,6 +32,9 @@
     <header class="topbar overlay-bar">
       <div class="brand">문서 스캐너</div>
       <div class="top-actions">
+        <button id="btnNativeCam" class="chip" title="폰 기본 카메라로 고화질 촬영">
+          <svg viewBox="0 0 24 24" class="chip-icon"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>고화질
+        </button>
         <button id="btnAuto" class="chip" aria-pressed="true" title="문서 자동 인식 표시">
           <span class="dot"></span>자동 인식
         </button>
@@ -182,8 +185,8 @@
   <canvas id="workCanvas" hidden></canvas>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="scanner.js?v=2"></script>
-  <script src="app.js?v=2"></script>
+  <script src="scanner.js?v=3"></script>
+  <script src="app.js?v=3"></script>
   <script>
     // OpenCV.js 로드 (실패 시 대체 CDN)
     (function loadOpenCV() {

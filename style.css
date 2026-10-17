@@ -84,6 +84,7 @@ svg.inline { width: 18px; height: 18px; vertical-align: -3px; margin-right: 4px;
   background: rgba(255,255,255,.12);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
+.chip .chip-icon { width: 16px; height: 16px; }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .chip[aria-pressed="true"] .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 
