@@ -175,11 +175,16 @@ window.App = (() => {
   const detectCanvas = document.createElement('canvas');
   let detectTimer = null, rafId = null;
 
+  let detectCost = 0;     // 직전 인식에 걸린 시간(ms) — 느린 폰에서는 간격을 늘린다
+  let lastRaw = null, stableCount = 0;
+
   function startDetectLoop() {
     stopDetectLoop();
     const tick = () => {
+      const t = performance.now();
       detectFrame();
-      detectTimer = setTimeout(tick, 150);
+      detectCost = performance.now() - t;
+      detectTimer = setTimeout(tick, Math.max(120, detectCost * 1.5));
     };
     tick();
     const draw = () => { drawOverlay(); rafId = requestAnimationFrame(draw); };
@@ -204,15 +209,27 @@ window.App = (() => {
     detectCanvas.width = Math.round(vw * s);
     detectCanvas.height = Math.round(vh * s);
     detectCanvas.getContext('2d', { willReadFrequently: true }).drawImage(video, 0, 0, detectCanvas.width, detectCanvas.height);
+    const prev = state.liveQuad ? state.liveQuad.map((p) => ({ x: p.x * s, y: p.y * s })) : null;
     let q = null;
-    try { q = Scanner.detect(detectCanvas, 360); } catch (e) { console.warn(e); }
+    try { q = Scanner.detect(detectCanvas, 360, prev, 0.2); } catch (e) { console.warn(e); }
 
+    // 같은 자리에서 연속으로 잡혀야(또는 아주 확실해야) 표시 — 순간적인 엉뚱한 사각형 방지
     if (q) {
+      const tol = Math.hypot(detectCanvas.width, detectCanvas.height) * 0.05;
+      stableCount = lastRaw && Scanner.nearQuad(q, lastRaw, tol) ? stableCount + 1 : 1;
+      lastRaw = q;
+    } else {
+      stableCount = 0;
+      lastRaw = null;
+    }
+    const show = q && (stableCount >= 2 || q.score >= 0.4 || (state.liveQuad && stableCount >= 1));
+
+    if (show) {
       state.liveQuad = q.map((p) => ({ x: p.x / s, y: p.y / s }));
       state.missCount = 0;
       hint.textContent = '문서를 찾았어요 · 촬영하세요';
       hint.classList.add('found');
-    } else if (++state.missCount > 4) {
+    } else if (++state.missCount > 5) {
       state.liveQuad = null;
       hint.textContent = '문서를 화면 안에 맞춰주세요';
       hint.classList.remove('found');
@@ -315,7 +332,7 @@ window.App = (() => {
   async function startSession(canvas, editIndex = null, hintQuad = null, savedQuad = null) {
     let quad = savedQuad;
     if (!quad && state.cvReady) {
-      try { quad = Scanner.detect(canvas, 600); } catch (e) { console.warn(e); }
+      try { quad = Scanner.detect(canvas, 600, hintQuad); } catch (e) { console.warn(e); }
     }
     if (!quad) quad = hintQuad;
     const detected = !!quad;
