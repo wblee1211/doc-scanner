@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d12" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>문서 스캐너</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 로딩 오버레이 -->
+  <div id="loader" class="loader">
+    <div class="spinner"></div>
+    <p id="loaderText">스캔 엔진(OpenCV) 불러오는 중…</p>
+  </div>
+
+  <!-- 1. 카메라 화면 -->
+  <section id="screen-camera" class="screen active">
+    <div class="camera-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div id="cameraMsg" class="camera-msg hidden">
+        <p id="cameraMsgText">카메라를 사용할 수 없습니다.</p>
+        <button class="btn primary" id="btnFallbackCapture">사진 촬영 / 선택</button>
+      </div>
+    </div>
+
+    <header class="topbar overlay-bar">
+      <div class="brand">문서 스캐너</div>
+      <div class="top-actions">
+        <button id="btnAuto" class="chip" aria-pressed="true" title="문서 자동 인식 표시">
+          <span class="dot"></span>자동 인식
+        </button>
+        <button id="btnTorch" class="icon-btn hidden" aria-label="플래시">
+          <svg viewBox="0 0 24 24"><path d="M7 2h10l-2 7h4L9 22l2-9H7z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="hint" class="hint">문서를 화면 안에 맞춰주세요</div>
+
+    <footer class="shutter-bar">
+      <label class="icon-btn big" aria-label="갤러리에서 선택">
+        <input type="file" id="fileInput" accept="image/*" multiple hidden />
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/></svg>
+      </label>
+      <button id="btnShutter" class="shutter" aria-label="촬영"><span></span></button>
+      <button id="btnPages" class="pages-btn" aria-label="스캔한 페이지 보기">
+        <img id="pagesThumb" alt="" />
+        <span id="pagesCount" class="badge hidden">0</span>
+        <svg class="empty-icon" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/></svg>
+      </button>
+    </footer>
+    <input type="file" id="fallbackInput" accept="image/*" capture="environment" hidden />
+  </section>
+
+  <!-- 2. 테두리 조정 화면 -->
+  <section id="screen-crop" class="screen">
+    <header class="topbar">
+      <button class="text-btn" id="btnCropBack">취소</button>
+      <div class="title">테두리 조정</div>
+      <button class="text-btn accent" id="btnCropApply">다음</button>
+    </header>
+    <div class="stage" id="cropStage">
+      <canvas id="cropCanvas"></canvas>
+    </div>
+    <p class="sub-hint" id="cropHint">모서리 점을 드래그해 문서 테두리에 맞추세요</p>
+    <footer class="toolbar">
+      <button class="tool" id="btnDetect">
+        <svg viewBox="0 0 24 24"><path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>
+        <span>자동 감지</span>
+      </button>
+      <button class="tool" id="btnFull">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        <span>전체 선택</span>
+      </button>
+      <button class="tool" id="btnRotateSrc">
+        <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+        <span>회전</span>
+      </button>
+    </footer>
+  </section>
+
+  <!-- 3. 보정 결과/필터 화면 -->
+  <section id="screen-edit" class="screen">
+    <header class="topbar">
+      <button class="text-btn" id="btnEditBack">뒤로</button>
+      <div class="title">보정</div>
+      <button class="text-btn accent" id="btnEditSave">저장</button>
+    </header>
+    <div class="stage">
+      <canvas id="editCanvas"></canvas>
+    </div>
+    <div class="filters" id="filters">
+      <button class="filter active" data-filter="original">원본</button>
+      <button class="filter" data-filter="magic">선명하게</button>
+      <button class="filter" data-filter="gray">그레이</button>
+      <button class="filter" data-filter="bw">흑백 문서</button>
+    </div>
+    <footer class="toolbar">
+      <button class="tool" id="btnRotateL">
+        <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.34-5.66"/><path d="M4 4v5h5"/></svg>
+        <span>왼쪽 회전</span>
+      </button>
+      <button class="tool" id="btnRotateR">
+        <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+        <span>오른쪽 회전</span>
+      </button>
+      <button class="tool" id="btnRecrop">
+        <svg viewBox="0 0 24 24"><path d="M6 2v16h16"/><path d="M2 6h16v16"/></svg>
+        <span>다시 자르기</span>
+      </button>
+    </footer>
+  </section>
+
+  <!-- 4. 페이지 목록 / PDF 화면 -->
+  <section id="screen-pages" class="screen">
+    <header class="topbar">
+      <button class="text-btn" id="btnPagesBack">
+        <svg viewBox="0 0 24 24" class="inline"><path d="M15 5l-7 7 7 7"/></svg>촬영
+      </button>
+      <div class="title">스캔한 문서 <span id="pagesTitleCount"></span></div>
+      <button class="text-btn danger" id="btnClearAll">전체 삭제</button>
+    </header>
+
+    <div class="pages-body">
+      <div id="pagesGrid" class="pages-grid"></div>
+      <div id="pagesEmpty" class="empty hidden">
+        <svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/></svg>
+        <p>아직 스캔한 페이지가 없어요</p>
+        <button class="btn primary" id="btnStartScan">스캔 시작</button>
+      </div>
+    </div>
+
+    <div class="export-panel" id="exportPanel">
+      <div class="field">
+        <label for="pdfName">파일 이름</label>
+        <div class="input-wrap">
+          <input id="pdfName" type="text" autocomplete="off" />
+          <span>.pdf</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>용지 크기</label>
+        <div class="segmented" id="pageSize">
+          <button data-size="a4" class="active">A4</button>
+          <button data-size="letter">Letter</button>
+          <button data-size="fit">이미지 맞춤</button>
+        </div>
+      </div>
+      <div class="export-actions">
+        <button class="btn ghost" id="btnShare">
+          <svg viewBox="0 0 24 24" class="inline"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v7h14v-7"/></svg>공유
+        </button>
+        <button class="btn primary grow" id="btnPdf">
+          <svg viewBox="0 0 24 24" class="inline"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>PDF 다운로드
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 페이지 미리보기 모달 -->
+  <div id="viewer" class="viewer hidden">
+    <header class="topbar">
+      <button class="text-btn" id="btnViewerClose">닫기</button>
+      <div class="title" id="viewerTitle"></div>
+      <button class="text-btn accent" id="btnViewerEdit">편집</button>
+    </header>
+    <div class="stage"><img id="viewerImg" alt="페이지 미리보기" /></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <canvas id="workCanvas" hidden></canvas>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="scanner.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // OpenCV.js 로드 (실패 시 대체 CDN)
+    (function loadOpenCV() {
+      const sources = [
+        'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+        'https://unpkg.com/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+        'https://docs.opencv.org/4.9.0/opencv.js'
+      ];
+      let i = 0;
+      function tryNext() {
+        if (i >= sources.length) { window.App.onOpenCvFailed(); return; }
+        const s = document.createElement('script');
+        s.src = sources[i++];
+        s.async = true;
+        s.onload = () => window.Scanner.init().then(window.App.onOpenCvReady, tryNext);
+        s.onerror = tryNext;
+        document.body.appendChild(s);
+      }
+      tryNext();
+    })();
+  </script>
+</body>
+</html>

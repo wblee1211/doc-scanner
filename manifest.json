@@ -1,0 +1,10 @@
+{
+  "name": "문서 스캐너",
+  "short_name": "스캐너",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "orientation": "portrait",
+  "icons": []
+}
