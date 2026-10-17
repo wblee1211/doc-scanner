@@ -16,10 +16,26 @@ window.App = (() => {
     pages: [],           // { src: dataURL, quad, filter, rotation, out: dataURL, w, h }
     session: null,       // 현재 편집 중인 { srcCanvas, quad, warped, filter, rotation, cache, editIndex }
     pageSize: 'a4',
+    scanMode: loadPref('scanMode', 'color'), // 'color' | 'bw'
     viewerIndex: -1,
   };
 
   // ---------- 공통 유틸 ----------
+  function loadPref(key, fallback) {
+    try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+  }
+  function savePref(key, value) {
+    try { localStorage.setItem(key, value); } catch {}
+  }
+
+  /** 스캔 모드에 맞는 기본 필터 */
+  const modeFilter = () => (state.scanMode === 'bw' ? 'bw' : 'clean');
+
+  function setScanMode(mode) {
+    state.scanMode = mode;
+    savePref('scanMode', mode);
+    document.querySelectorAll('#scanMode button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  }
   let toastTimer;
   function toast(msg, ms = 2000) {
     const t = $('toast');
@@ -244,18 +260,55 @@ window.App = (() => {
   }
 
   // ---------- 촬영 ----------
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+  /**
+   * 고해상도 사진 촬영 (안드로이드 Chrome의 ImageCapture: 미리보기보다 훨씬 큰 센서 해상도)
+   * 지원하지 않거나 방향이 미리보기와 다르면 null → 비디오 프레임 사용
+   */
+  async function takeHighResPhoto(video) {
+    if (!('ImageCapture' in window) || !state.track) return null;
+    try {
+      const ic = new ImageCapture(state.track);
+      const blob = await withTimeout(ic.takePhoto(), 5000);
+      const bmp = await createImageBitmap(blob);
+      const sameOrientation = (bmp.width > bmp.height) === (video.videoWidth > video.videoHeight);
+      const bigger = bmp.width * bmp.height > video.videoWidth * video.videoHeight * 1.2;
+      if (!sameOrientation || !bigger) { bmp.close && bmp.close(); return null; }
+      const canvas = canvasFromImage(bmp, 4000);
+      bmp.close && bmp.close();
+      return canvas;
+    } catch (e) {
+      console.warn('takePhoto 실패, 미리보기 프레임 사용', e);
+      return null;
+    }
+  }
+
+  let capturing = false;
   async function capture() {
     const video = $('video');
     if (!video.videoWidth) { $('fallbackInput').click(); return; }
+    if (capturing) return;
+    capturing = true;
+    $('btnShutter').disabled = true;
     const flash = document.createElement('div');
     flash.className = 'flash';
     document.body.appendChild(flash);
     setTimeout(() => flash.remove(), 300);
 
-    const canvas = canvasFromImage(video, 3000);
-    const s = canvas.width / video.videoWidth;
-    const live = state.liveQuad ? state.liveQuad.map((p) => ({ x: p.x * s, y: p.y * s })) : null;
-    await startSession(canvas, null, live);
+    try {
+      const liveVideoQuad = state.liveQuad;
+      let canvas = await takeHighResPhoto(video);
+      if (!canvas) canvas = canvasFromImage(video, 3000);
+      // 미리보기와 비율이 같을 때만 실시간 인식 결과를 힌트로 사용
+      const sameAspect = Math.abs(canvas.width / canvas.height - video.videoWidth / video.videoHeight) < 0.02;
+      const s = canvas.width / video.videoWidth;
+      const live = liveVideoQuad && sameAspect ? liveVideoQuad.map((p) => ({ x: p.x * s, y: p.y * s })) : null;
+      await startSession(canvas, null, live);
+    } finally {
+      capturing = false;
+      $('btnShutter').disabled = false;
+    }
   }
 
   /** 새 촬영/불러온 이미지로 편집 세션 시작 */
@@ -272,7 +325,7 @@ window.App = (() => {
       srcCanvas: canvas,
       quad,
       warped: null,
-      filter: editIndex != null ? state.pages[editIndex].filter : 'original',
+      filter: editIndex != null ? state.pages[editIndex].filter : modeFilter(),
       rotation: editIndex != null ? state.pages[editIndex].rotation : 0,
       cache: {},
       editIndex,
@@ -309,7 +362,8 @@ window.App = (() => {
         if (state.cvReady) { try { quad = Scanner.detect(canvas, 600); } catch {} }
         quad = quad || fullQuad(canvas.width, canvas.height);
         const warped = Scanner.warp(canvas, quad);
-        addPage({ srcCanvas: canvas, quad, filter: 'original', rotation: 0, outCanvas: warped }, null);
+        const filter = modeFilter();
+        addPage({ srcCanvas: canvas, quad, filter, rotation: 0, outCanvas: Scanner.applyFilter(warped, filter) }, null);
       } catch (e) { console.warn(e); }
       finally { URL.revokeObjectURL(url); }
     }
@@ -747,6 +801,11 @@ window.App = (() => {
       }
     });
     $('btnTorch').addEventListener('click', toggleTorch);
+    $('scanMode').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (b) { setScanMode(b.dataset.mode); toast(b.dataset.mode === 'bw' ? '흑백 모드로 스캔해요' : '컬러 모드로 스캔해요', 1200); }
+    });
+    setScanMode(state.scanMode);
     $('btnPages').addEventListener('click', () => showScreen('pages'));
     $('fileInput').addEventListener('change', (e) => { handleFiles(e.target.files); e.target.value = ''; });
     $('fallbackInput').addEventListener('change', (e) => { handleFiles(e.target.files); e.target.value = ''; });

@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>문서 스캐너</title>
   <link rel="manifest" href="manifest.json" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
   <!-- 로딩 오버레이 -->
@@ -42,6 +42,11 @@
     </header>
 
     <div id="hint" class="hint">문서를 화면 안에 맞춰주세요</div>
+
+    <div class="mode-switch" id="scanMode" role="radiogroup" aria-label="스캔 모드">
+      <button data-mode="color" role="radio">컬러</button>
+      <button data-mode="bw" role="radio">흑백</button>
+    </div>
 
     <footer class="shutter-bar">
       <label class="icon-btn big" aria-label="갤러리에서 선택">
@@ -96,10 +101,10 @@
       <canvas id="editCanvas"></canvas>
     </div>
     <div class="filters" id="filters">
-      <button class="filter active" data-filter="original">원본</button>
-      <button class="filter" data-filter="magic">선명하게</button>
-      <button class="filter" data-filter="gray">그레이</button>
+      <button class="filter" data-filter="clean">컬러 문서</button>
       <button class="filter" data-filter="bw">흑백 문서</button>
+      <button class="filter" data-filter="gray">그레이</button>
+      <button class="filter" data-filter="original">원본</button>
     </div>
     <footer class="toolbar">
       <button class="tool" id="btnRotateL">
@@ -177,8 +182,8 @@
   <canvas id="workCanvas" hidden></canvas>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="scanner.js"></script>
-  <script src="app.js"></script>
+  <script src="scanner.js?v=2"></script>
+  <script src="app.js?v=2"></script>
   <script>
     // OpenCV.js 로드 (실패 시 대체 CDN)
     (function loadOpenCV() {

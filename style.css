@@ -113,7 +113,7 @@ svg.inline { width: 18px; height: 18px; vertical-align: -3px; margin-right: 4px;
 }
 
 .hint {
-  position: absolute; left: 50%; bottom: calc(var(--safe-bottom) + 132px);
+  position: absolute; left: 50%; bottom: calc(var(--safe-bottom) + 178px);
   transform: translateX(-50%);
   padding: 8px 16px; border-radius: 999px; font-size: 14px; white-space: nowrap;
   background: rgba(0,0,0,.55);
@@ -121,6 +121,20 @@ svg.inline { width: 18px; height: 18px; vertical-align: -3px; margin-right: 4px;
   transition: background .25s, color .25s; z-index: 3;
 }
 .hint.found { background: rgba(52,211,153,.9); color: #062a1c; font-weight: 600; }
+
+.mode-switch {
+  position: absolute; left: 50%; bottom: calc(var(--safe-bottom) + 126px); z-index: 4;
+  transform: translateX(-50%);
+  display: flex; gap: 2px; padding: 3px; border-radius: 999px;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.mode-switch button {
+  min-width: 64px; height: 32px; padding: 0 14px; border-radius: 999px;
+  font-size: 14px; color: rgba(255,255,255,.75);
+  transition: background .2s, color .2s;
+}
+.mode-switch button.active { background: #fff; color: #111; font-weight: 700; }
 
 .shutter-bar {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;

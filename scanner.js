@@ -207,30 +207,179 @@ window.Scanner = (() => {
     return out;
   }
 
-  /** 그림자/조명 얼룩 제거용 배경 추정 (축소 후 처리해 속도 확보) */
-  function estimateBackground(ch) {
+  /** 그림자/조명 얼룩 제거용 배경(종이색) 추정 — 축소 후 글자를 지우고 부드럽게 퍼뜨린다 */
+  // size가 작을수록 더 큰 물체(색칠된 도형 등)까지 '내용'으로 보고 보존한다
+  function estimateBackground(ch, size = 600) {
     const small = new cv.Mat(), bg = new cv.Mat();
-    const f = Math.min(1, 600 / Math.max(ch.cols, ch.rows));
+    const f = Math.min(1, size / Math.max(ch.cols, ch.rows));
     cv.resize(ch, small, new cv.Size(Math.round(ch.cols * f), Math.round(ch.rows * f)), 0, 0, cv.INTER_AREA);
-    const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(7, 7));
+    const k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7, 7));
     cv.dilate(small, small, k, new cv.Point(-1, -1), 2);
-    cv.medianBlur(small, small, 21);
+    cv.medianBlur(small, small, size >= 400 ? 21 : 11);
+    cv.GaussianBlur(small, small, new cv.Size(0, 0), size >= 400 ? 4 : 3);
     cv.resize(small, bg, new cv.Size(ch.cols, ch.rows), 0, 0, cv.INTER_LINEAR);
     small.delete(); k.delete();
     return bg;
   }
 
-  function normalizeChannel(ch) {
-    const bg = estimateBackground(ch);
+  /** 채널을 배경으로 나눠 종이를 흰색(≈255)으로 맞추고, 글자 윤곽을 살짝 선명하게 */
+  function normalizeChannel(ch, sharpen = true, bgSize = 600) {
+    const den = new cv.Mat();
+    cv.GaussianBlur(ch, den, new cv.Size(3, 3), 0); // 카메라 노이즈 완화
+    const bg = estimateBackground(den, bgSize);
     const out = new cv.Mat();
-    cv.divide(ch, bg, out, 255);
-    bg.delete();
+    cv.divide(den, bg, out, 255);
+    bg.delete(); den.delete();
+    if (sharpen) {
+      const blur = new cv.Mat();
+      cv.GaussianBlur(out, blur, new cv.Size(0, 0), 1.5);
+      cv.addWeighted(out, 1.5, blur, -0.5, 0, out);
+      blur.delete();
+    }
+    return out;
+  }
+
+  function percentile(hist, total, p) {
+    let acc = 0;
+    for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc >= total * p) return i; }
+    return 255;
+  }
+
+  /**
+   * 정규화된 이미지의 밝기 분포에서 흰점/검은점 자동 계산
+   * - 흰점보다 밝은 것(종이, 뒷면 비침, 노이즈)은 완전한 흰색으로
+   * - 검은점보다 어두운 것(글자)은 진한 검정으로
+   */
+  function autoLevels(lumAt, count) {
+    const hist = new Uint32Array(256);
+    const step = Math.max(1, Math.floor(count / 250000));
+    let n = 0;
+    for (let i = 0; i < count; i += step) { hist[lumAt(i)]++; n++; }
+    const paper = percentile(hist, n, 0.5);   // 종이가 화면 대부분을 차지
+    const ink = percentile(hist, n, 0.01);
+    const white = Math.max(160, Math.min(240, paper - LEVELS.whiteGap));
+    const black = Math.max(0, Math.min(white - 80, ink + LEVELS.blackLift));
+    return { white, black };
+  }
+
+  const LEVELS = { whiteGap: 28, blackLift: 30, saturation: 1.6, chromaDeadZone: 4, bwRatio: 0.75 };
+
+  /** 종이의 색 틴트(누런/푸른 기운) 추정 — 아주 거칠게 퍼뜨려 도형 색은 건드리지 않는다 */
+  function estimateTint(ch) {
+    const small = new cv.Mat(), out = new cv.Mat();
+    const f = Math.min(1, 80 / Math.max(ch.cols, ch.rows));
+    cv.resize(ch, small, new cv.Size(Math.max(1, Math.round(ch.cols * f)), Math.max(1, Math.round(ch.rows * f))), 0, 0, cv.INTER_AREA);
+    cv.medianBlur(small, small, 5);
+    cv.GaussianBlur(small, small, new cv.Size(0, 0), 2);
+    cv.resize(small, out, new cv.Size(ch.cols, ch.rows), 0, 0, cv.INTER_LINEAR);
+    small.delete();
     return out;
   }
 
   /**
+   * 컬러 문서: 밝기(Y)와 색(Cr, Cb)을 분리해서 처리
+   * - 밝기: 세밀한 배경 추정으로 그림자·조명 얼룩 제거 → 종이는 흰색, 글자는 진하게
+   * - 색: 종이 틴트만 빼고 도형/글자 색은 살림, 잔 색 노이즈는 제거
+   */
+  function cleanColor(src, out) {
+    const rgb = new cv.Mat();
+    cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
+    cv.GaussianBlur(rgb, rgb, new cv.Size(3, 3), 0); // 카메라 노이즈 완화
+    const ycc = new cv.Mat();
+    cv.cvtColor(rgb, ycc, cv.COLOR_RGB2YCrCb);
+    rgb.delete();
+    const parts = new cv.MatVector();
+    cv.split(ycc, parts);
+    ycc.delete();
+    const Y = parts.get(0), Cr = parts.get(1), Cb = parts.get(2);
+    parts.delete();
+
+    const bgY = estimateBackground(Y, 600);
+    const Yn = new cv.Mat();
+    cv.divide(Y, bgY, Yn, 255);
+    const blur = new cv.Mat();
+    cv.GaussianBlur(Yn, blur, new cv.Size(0, 0), 1.5);
+    cv.addWeighted(Yn, 1.5, blur, -0.5, 0, Yn);
+    blur.delete(); Y.delete();
+
+    const tCr = estimateTint(Cr), tCb = estimateTint(Cb);
+    cv.GaussianBlur(Cr, Cr, new cv.Size(0, 0), 2);
+    cv.GaussianBlur(Cb, Cb, new cv.Size(0, 0), 2);
+
+    const y = Yn.data, bg = bgY.data, cr = Cr.data, cb = Cb.data, tr = tCr.data, tb = tCb.data;
+    const px = Yn.rows * Yn.cols;
+    const { white, black } = autoLevels((i) => y[i], px);
+    const scale = 255 / (white - black);
+    const sat = LEVELS.saturation * scale;
+    const dead = LEVELS.chromaDeadZone;
+
+    const img = new ImageData(Yn.cols, Yn.rows);
+    const o = img.data;
+    for (let i = 0, k = 0; i < px; i++, k += 4) {
+      const L = (y[i] - black) * scale;
+      let dr = cr[i] - tr[i], db = cb[i] - tb[i];
+      // 색 세기가 약한 것(종이 얼룩·노이즈)은 무채색으로, 뚜렷한 색(연한 색칠 포함)은 살린다
+      const m = Math.hypot(dr, db);
+      const keep = m <= dead ? 0 : (m - dead) / m;
+      // 어두운 곳(그림자)에서 찍힌 색은 밝기 보정만큼 키워준다
+      const g = Math.min(3, 255 / Math.max(bg[i], 40)) * sat * keep;
+      dr *= g; db *= g;
+      o[k] = L + 1.403 * dr;
+      o[k + 1] = L - 0.714 * dr - 0.344 * db;
+      o[k + 2] = L + 1.773 * db;
+      o[k + 3] = 255; // Uint8ClampedArray가 0~255로 자름
+    }
+    Yn.delete(); bgY.delete(); Cr.delete(); Cb.delete(); tCr.delete(); tCb.delete();
+    out.getContext('2d').putImageData(img, 0, 0);
+  }
+
+  /** 흑백 이미지에서 몇 픽셀짜리 외딴 검은 점만 지운다 (가는 선·글자는 보존) */
+  function removeSpeckles(bin, maxArea) {
+    const inv = new cv.Mat(), labels = new cv.Mat(), stats = new cv.Mat(), cents = new cv.Mat();
+    cv.bitwise_not(bin, inv);
+    const n = cv.connectedComponentsWithStats(inv, labels, stats, cents, 8, cv.CV_32S);
+    const small = new Uint8Array(n);
+    for (let i = 1; i < n; i++) small[i] = stats.intAt(i, cv.CC_STAT_AREA) <= maxArea ? 1 : 0;
+    const lab = labels.data32S, b = bin.data;
+    for (let i = 0; i < lab.length; i++) if (small[lab[i]]) b[i] = 255;
+    inv.delete(); labels.delete(); stats.delete(); cents.delete();
+  }
+
+  /** 회색조 / 흑백 문서 */
+  function cleanGray(src, out, binary) {
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    const norm = normalizeChannel(gray);
+    gray.delete();
+    const d = norm.data;
+    const px = norm.rows * norm.cols;
+    const { white, black } = autoLevels((i) => d[i], px);
+
+    const img = new ImageData(norm.cols, norm.rows);
+    const o = img.data;
+    if (binary) {
+      const bin = new cv.Mat();
+      cv.threshold(norm, bin, black + (white - black) * LEVELS.bwRatio, 255, cv.THRESH_BINARY);
+      removeSpeckles(bin, Math.max(4, Math.round(px / 400000)));
+      const b = bin.data;
+      for (let i = 0, k = 0; i < px; i++, k += 4) {
+        o[k] = o[k + 1] = o[k + 2] = b[i]; o[k + 3] = 255;
+      }
+      bin.delete();
+    } else {
+      const scale = 255 / (white - black);
+      for (let i = 0, k = 0; i < px; i++, k += 4) {
+        const v = (d[i] - black) * scale;
+        o[k] = o[k + 1] = o[k + 2] = v; o[k + 3] = 255;
+      }
+    }
+    norm.delete();
+    out.getContext('2d').putImageData(img, 0, 0);
+  }
+
+  /**
    * 필터 적용
-   * @param {'original'|'magic'|'gray'|'bw'} filter
+   * @param {'original'|'clean'|'gray'|'bw'} filter
    */
   function applyFilter(canvas, filter) {
     const out = document.createElement('canvas');
@@ -239,44 +388,15 @@ window.Scanner = (() => {
       out.getContext('2d').drawImage(canvas, 0, 0);
       return out;
     }
-
     const src = cv.imread(canvas);
-    const dst = new cv.Mat();
     try {
-      if (filter === 'gray') {
-        cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-      } else if (filter === 'magic') {
-        const rgb = new cv.Mat();
-        cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
-        const chans = new cv.MatVector();
-        cv.split(rgb, chans);
-        const merged = new cv.MatVector();
-        for (let i = 0; i < 3; i++) {
-          const c = chans.get(i);
-          const n = normalizeChannel(c);
-          merged.push_back(n);
-          c.delete(); n.delete();
-        }
-        const tmp = new cv.Mat();
-        cv.merge(merged, tmp);
-        // 약간의 대비 강화
-        tmp.convertTo(dst, -1, 1.15, -20);
-        rgb.delete(); chans.delete(); merged.delete(); tmp.delete();
-      } else if (filter === 'bw') {
-        const gray = new cv.Mat();
-        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-        const norm = normalizeChannel(gray);
-        let block = Math.round(Math.max(gray.cols, gray.rows) / 60) | 1;
-        block = Math.max(15, block);
-        cv.adaptiveThreshold(norm, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, block, 12);
-        gray.delete(); norm.delete();
-      }
-      cv.imshow(out, dst);
+      if (filter === 'clean') cleanColor(src, out);
+      else cleanGray(src, out, filter === 'bw');
     } finally {
-      src.delete(); dst.delete();
+      src.delete();
     }
     return out;
   }
 
-  return { init, isReady, detect, warp, applyFilter, orderQuad, isConvex, polygonArea };
+  return { init, isReady, detect, warp, applyFilter, orderQuad, isConvex, polygonArea, LEVELS };
 })();
